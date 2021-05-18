@@ -250,10 +250,11 @@ func (s *SSH) Rfs() Fs {
 	return newWdFs(s.rwd, s.rfs)
 }
 
-func (s *SSH) Rcmd(cmd string, env ...string) {
-	s.withErrorCheck(func() error {
-		return s.runRcmd(cmd, env...)
-	})
+func (s *SSH) Rcmd(cmd string, env ...string) ([]byte, error) {
+	//s.withErrorCheck(func() error {
+	//	return s.runRcmd(cmd, env...)
+	//})
+	return s.runRcmd(cmd, env...)
 }
 
 func (s *SSH) Lcmd(cmd string, env ...string) {
@@ -488,14 +489,18 @@ func (s *SSH) runCmd(isRemote bool, stdin *io.Reader, stdout, stderr *io.Writer,
 	return run()
 }
 
-func (s *SSH) runRcmd(cmd string, env ...string) error {
+func (s *SSH) runRcmd(cmd string, env ...string) ([]byte, error) {
+	var stdout, stderr bytes.Buffer
 	for {
 		session, ok := s.sessionPool.Take()
 		if !ok {
-			return ErrConnClosed
+			return stdout.Bytes(), ErrConnClosed
 		}
 
 		sess, err := s.conn.NewSession()
+
+		sess.Stdout = &stdout
+		sess.Stderr = &stderr
 		if err != nil {
 			if chanErr, ok := err.(*ssh.OpenChannelError); ok {
 				if chanErr.Reason == ssh.Prohibited {
@@ -505,7 +510,7 @@ func (s *SSH) runRcmd(cmd string, env ...string) error {
 			}
 
 			session.Release()
-			return err
+			return stdout.Bytes(), err
 		}
 
 		defer func() {
@@ -514,9 +519,8 @@ func (s *SSH) runRcmd(cmd string, env ...string) error {
 		}()
 
 		cmd := s.rcmdStr(cmd, strings.Join(env, " "))
-		return s.runCmd(true, &sess.Stdin, &sess.Stdout, &sess.Stderr, func() error {
-			return sess.Run(cmd)
-		})
+		err = sess.Run(cmd)
+		return stdout.Bytes(), err
 	}
 }
 
